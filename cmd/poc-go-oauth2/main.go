@@ -24,10 +24,11 @@ func main() {
 
 	// Routes for the application
 	http.HandleFunc("/", services.HandleMain)
-	http.HandleFunc("/login-fb", services.HandleFacebookLogin)
-	http.HandleFunc("/callback-fb", services.CallBackFromFacebook)
+	//http.HandleFunc("/login-fb", services.HandleFacebookLogin)
+	//http.HandleFunc("/callback-fb", services.CallBackFromFacebook)
 	http.HandleFunc("/login-gl", services.HandleGoogleLogin)
-	http.HandleFunc("/callback-gl", services.CallBackFromGoogle)
+	//http.HandleFunc("/callback-gl", services.CallBackFromGoogle)
+	http.HandleFunc("/callback-gl", services.CallBackToIAM)
 
 	logger.Log.Info("Started running on http://localhost:" + viper.GetString("port"))
 	log.Fatal(http.ListenAndServe(":"+viper.GetString("port"), nil))
