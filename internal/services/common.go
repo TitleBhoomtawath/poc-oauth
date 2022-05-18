@@ -13,7 +13,7 @@ import (
 /*
 HandleMain Function renders the index page when the application index route is called
 */
-func HandleMain(w http.ResponseWriter, r *http.Request) {
+func HandleMain(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(pages.IndexPage))
@@ -32,7 +32,8 @@ func HandleLogin(w http.ResponseWriter, r *http.Request, oauthConf *oauth2.Confi
 	parameters.Add("client_id", oauthConf.ClientID)
 	parameters.Add("scope", strings.Join(oauthConf.Scopes, " "))
 	parameters.Add("redirect_uri", oauthConf.RedirectURL)
-	parameters.Add("response_type", "code")
+	//parameters.Add("response_type", "code")
+	parameters.Add("response_type", "token")
 	parameters.Add("state", oauthStateString)
 	URL.RawQuery = parameters.Encode()
 	url := URL.String()

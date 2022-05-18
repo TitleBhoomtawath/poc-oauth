@@ -28,6 +28,7 @@ func main() {
 	//http.HandleFunc("/callback-fb", services.CallBackFromFacebook)
 	http.HandleFunc("/login-gl", services.HandleGoogleLogin)
 	//http.HandleFunc("/callback-gl", services.CallBackFromGoogle)
+	http.HandleFunc("/login-iam", services.HandleIAMLogin)
 	http.HandleFunc("/callback-gl", services.CallBackToIAM)
 
 	logger.Log.Info("Started running on http://localhost:" + viper.GetString("port"))

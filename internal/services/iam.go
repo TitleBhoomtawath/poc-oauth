@@ -13,9 +13,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/BNPrashanth/poc-go-oauth2/internal/logger"
-	"github.com/deliveryhero/mystiko-go"
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 )
@@ -59,27 +59,34 @@ func ExchangeWithIAM(code string) (*oauth2.Token, error) {
 		"client_id":  {appID},
 		"grant_type": {"authorization_code"},
 		"code":       {code},
-		//"scope":      {"application.ops-portal-pd-corporate-api namespace.ops-portal-pd-corporate-api"},
+		"scope":      {"application.ops-portal-pd-corporate-api namespace.FP_SG"},
+		//"scope": {"application.corporate-api namespace.FP_SG"},
 	}
 	reqBody := formData.Encode()
 	logger.Log.Info("request body: " + reqBody)
-	req, err := mystiko.NewHMACRequest(http.MethodPost, "https://iam-st.dh-auth.io/api/v1/oauth2/token", strings.NewReader(reqBody), appID, []byte(hmacKey))
+	decodedHMAC, err := base64.StdEncoding.DecodeString(hmacKey)
+	if err != nil {
+		return nil, err
+	}
+	//req, err := mystiko.NewHMACRequest(http.MethodPost, "https://iam-st.dh-auth.io/api/v1/oauth2/token", strings.NewReader(reqBody), appID, decodedHMAC)
 	//if err != nil {
 	//	return nil, err
 	//}
-	//hmacHeaders, err := NewHMACHeaders(http.MethodPost, "/api/v1/oauth2/token", []byte(reqBody), appID, []byte(hmacKey), time.Now().UTC().Format(time.RFC850))
-	//if err != nil {
-	//	return nil, err
-	//}
+	hmacHeaders, err := NewHMACHeaders(http.MethodPost, "/api/v1/oauth2/token", []byte(reqBody), appID, decodedHMAC, time.Now().UTC().Format(time.RFC850))
+	logger.Log.Info(fmt.Sprintf("HMAC header %s", hmacHeaders.Authorization))
+	logger.Log.Info(fmt.Sprintf("X-DHH-Date %s", hmacHeaders.XDHHDate))
+	if err != nil {
+		return nil, err
+	}
 	//fmt.Printf("is auth match %v", hmacHeaders.Authorization == req.Header.Get("Authorization"))
-	//req, err := http.NewRequest(http.MethodPost, "https://iam-st.dh-auth.io/api/v1/oauth2/token", strings.NewReader(formData.Encode()))
-	//if err != nil {
-	//	return nil, err
-	//}
+	req, err := http.NewRequest(http.MethodPost, "https://iam-st.dh-auth.io/api/v1/oauth2/token", strings.NewReader(formData.Encode()))
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	//req.Header.Set("Date", hmacHeaders.Date)
-	//req.Header.Set("X-DHH-Date", hmacHeaders.XDHHDate)
-	//req.Header.Set("Authorization", hmacHeaders.Authorization)
+	req.Header.Set("Date", hmacHeaders.Date)
+	req.Header.Set("X-DHH-Date", hmacHeaders.XDHHDate)
+	req.Header.Set("Authorization", hmacHeaders.Authorization)
 
 	client := &http.Client{}
 
@@ -96,7 +103,7 @@ func ExchangeWithIAM(code string) (*oauth2.Token, error) {
 		}
 
 		token := &oauth2.Token{}
-		err = json.Unmarshal(body, &token)
+		err = json.Unmarshal(body, token)
 		if err != nil {
 			return nil, err
 		}
@@ -115,10 +122,59 @@ func ExchangeWithIAM(code string) (*oauth2.Token, error) {
 	return nil, errors.New(errorResponse.Meta.Description)
 }
 
+type IAMLoginRequest struct {
+	Token string `json:"token"`
+}
+
+func HandleIAMLogin(w http.ResponseWriter, r *http.Request) {
+	setupHeader(w, r)
+	if r.Method == http.MethodPost {
+		var iamReq IAMLoginRequest
+		if err := json.NewDecoder(r.Body).Decode(&iamReq); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("bad request"))
+		}
+
+		fmt.Println(iamReq.Token)
+		token, err := ExchangeWithIAM(iamReq.Token)
+		if err != nil {
+			logger.Log.Error("ExchangeWithIAM failed with " + err.Error() + "\n")
+			return
+		}
+		logger.Log.Info("TOKEN>> AccessToken>> " + token.AccessToken)
+		logger.Log.Info("TOKEN>> Expiration Time>> " + token.Expiry.String())
+		logger.Log.Info("TOKEN>> RefreshToken>> " + token.RefreshToken)
+
+		resp, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + url.QueryEscape(token.AccessToken))
+		if err != nil {
+			logger.Log.Error("Get: " + err.Error() + "\n")
+			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+			return
+		}
+		defer resp.Body.Close()
+
+		response, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			logger.Log.Error("ReadAll: " + err.Error() + "\n")
+			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+			return
+		}
+
+		logger.Log.Info("parseResponseBody: " + string(response) + "\n")
+
+		w.Write([]byte("Hello, I'm protected\n"))
+		w.Write(response)
+		return
+	}
+}
+
 func CallBackToIAM(w http.ResponseWriter, r *http.Request) {
-	code := r.FormValue("code")
+	setupHeader(w, r)
+	//code := r.FormValue("code")
+	r.ParseForm()
+	form := r.Form
+	code := form.Get("code")
 	logger.Log.Info(code)
-	//code = "4/0AX4XfWjX_AL97tJZo8cKSW7KP6TXuiRwuPIEutXzR_nHu4iyyVn0VrT8dCWsxhqrQ3LpUA"
 
 	if code == "" {
 		logger.Log.Warn("Code not found..")
@@ -128,7 +184,7 @@ func CallBackToIAM(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("User has denied Permission.."))
 		}
 		// User has denied access..
-		// http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 	} else {
 		token, err := ExchangeWithIAM(code)
 		if err != nil {
@@ -157,7 +213,7 @@ func CallBackToIAM(w http.ResponseWriter, r *http.Request) {
 		logger.Log.Info("parseResponseBody: " + string(response) + "\n")
 
 		w.Write([]byte("Hello, I'm protected\n"))
-		w.Write([]byte(string(response)))
+		w.Write(response)
 		return
 	}
 }
@@ -166,6 +222,13 @@ type HMACHeaders struct {
 	Authorization string
 	Date          string
 	XDHHDate      string
+}
+
+func setupHeader(rw http.ResponseWriter, req *http.Request) {
+	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set("Access-Control-Allow-Origin", "*")
+	rw.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	rw.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
 }
 
 // NewHMACHeaders returns a Headers required for HMAC authentication
@@ -245,6 +308,7 @@ func NewHMACRequest(method string, rurl string, body io.Reader, keyID string, ke
 	signature := []byte(fmt.Sprintf("%s:%s", keyID, base64.StdEncoding.EncodeToString(sum)))
 	encodedSignature := base64.StdEncoding.EncodeToString(signature)
 	req.Header.Set("Authorization", fmt.Sprintf("HMAC %s", encodedSignature))
+	logger.Log.Info(fmt.Sprintf("Authorization header: %s", fmt.Sprintf("HMAC %s", encodedSignature)))
 	req.Header.Set("Date", ts)
 	req.Header.Set("X-DHH-Date", ts)
 
