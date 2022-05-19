@@ -21,6 +21,7 @@ func main() {
 	// Initialize Oauth2 Services
 	services.InitializeOAuthFacebook()
 	services.InitializeOAuthGoogle()
+	services.InitializeOAuthIAM()
 
 	// Routes for the application
 	http.HandleFunc("/", services.HandleMain)

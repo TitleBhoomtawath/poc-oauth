@@ -8,3 +8,10 @@ google:
 facebook:
   clientID: "facebook client id"
   clientSecret: "facebook client secret"
+iam:
+ authURL: "https://iam-st.dh-auth.io/api/v1/oauth2/token"
+ clientID: "318116953955-d74bskibjt28mlpmansr1i9v11avacki.apps.googleusercontent.com"
+ hmacKey: "hmac key provided by IAM team"
+ appID: "ops-portal-pd-corporate-api"
+ namespace: "FP_SG"
+

@@ -17,13 +17,35 @@ import (
 
 	"github.com/BNPrashanth/poc-go-oauth2/internal/logger"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 	"golang.org/x/oauth2"
 )
 
-const (
-	hmacKey = "hZbjMQJX8nTEDNo4irRIpQf74I1H0N1Jl8WVqIqnm6gpKkjSefN+qwX4zC2K15BlLVc2tduoWJBdEQrF9KrX8A=="
-	appID   = "ops-portal-pd-corporate-api"
-)
+type OAuthIAMConf struct {
+	ClientID  string
+	HMACKey   string
+	AuthURL   string
+	AppID     string
+	Namespace string
+}
+
+var oauthIAMConf = &OAuthIAMConf{}
+
+// InitializeOAuthIAM initialize IAM
+func InitializeOAuthIAM() {
+	oauthIAMConf.ClientID = viper.GetString("iam.clientID")
+	oauthIAMConf.AuthURL = viper.GetString("iam.authURL")
+	oauthIAMConf.AppID = viper.GetString("iam.appID")
+	oauthIAMConf.HMACKey = viper.GetString("iam.hmacKey")
+	oauthIAMConf.Namespace = viper.GetString("iam.namespace")
+}
+
+// AuthenticationResponse response structure
+type AuthenticationResponse struct {
+	AccessToken  string `json:"access_token"`
+	Expiry       string `json:"expiry"`
+	RefreshToken string `json:"refresh_token"`
+}
 
 // TokenRequestBodyDTO request body for exchanging code for access token
 type TokenRequestBodyDTO struct {
@@ -56,30 +78,25 @@ type TokenResponseBodyDTO struct {
 
 func ExchangeWithIAM(code string) (*oauth2.Token, error) {
 	formData := url.Values{
-		"client_id":  {appID},
+		"client_id":  {oauthIAMConf.AppID},
 		"grant_type": {"authorization_code"},
 		"code":       {code},
-		"scope":      {"application.ops-portal-pd-corporate-api namespace.FP_SG"},
-		//"scope": {"application.corporate-api namespace.FP_SG"},
+		"scope":      {"application." + oauthIAMConf.AppID + " namespace." + oauthIAMConf.Namespace},
 	}
 	reqBody := formData.Encode()
-	logger.Log.Info("request body: " + reqBody)
-	decodedHMAC, err := base64.StdEncoding.DecodeString(hmacKey)
+	decodedHMAC, err := base64.StdEncoding.DecodeString(oauthIAMConf.HMACKey)
 	if err != nil {
 		return nil, err
 	}
-	//req, err := mystiko.NewHMACRequest(http.MethodPost, "https://iam-st.dh-auth.io/api/v1/oauth2/token", strings.NewReader(reqBody), appID, decodedHMAC)
-	//if err != nil {
-	//	return nil, err
-	//}
-	hmacHeaders, err := NewHMACHeaders(http.MethodPost, "/api/v1/oauth2/token", []byte(reqBody), appID, decodedHMAC, time.Now().UTC().Format(time.RFC850))
+
+	hmacHeaders, err := NewHMACHeaders(http.MethodPost, "/api/v1/oauth2/token", []byte(reqBody), oauthIAMConf.AppID, decodedHMAC, time.Now().UTC().Format(time.RFC850))
 	logger.Log.Info(fmt.Sprintf("HMAC header %s", hmacHeaders.Authorization))
 	logger.Log.Info(fmt.Sprintf("X-DHH-Date %s", hmacHeaders.XDHHDate))
 	if err != nil {
 		return nil, err
 	}
 	//fmt.Printf("is auth match %v", hmacHeaders.Authorization == req.Header.Get("Authorization"))
-	req, err := http.NewRequest(http.MethodPost, "https://iam-st.dh-auth.io/api/v1/oauth2/token", strings.NewReader(formData.Encode()))
+	req, err := http.NewRequest(http.MethodPost, oauthIAMConf.AuthURL, strings.NewReader(formData.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -145,25 +162,16 @@ func HandleIAMLogin(w http.ResponseWriter, r *http.Request) {
 		logger.Log.Info("TOKEN>> Expiration Time>> " + token.Expiry.String())
 		logger.Log.Info("TOKEN>> RefreshToken>> " + token.RefreshToken)
 
-		resp, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + url.QueryEscape(token.AccessToken))
-		if err != nil {
-			logger.Log.Error("Get: " + err.Error() + "\n")
-			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
-			return
-		}
-		defer resp.Body.Close()
-
-		response, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			logger.Log.Error("ReadAll: " + err.Error() + "\n")
-			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
-			return
+		respPayload := AuthenticationResponse{
+			AccessToken:  token.AccessToken,
+			Expiry:       token.Expiry.String(),
+			RefreshToken: token.RefreshToken,
 		}
 
-		logger.Log.Info("parseResponseBody: " + string(response) + "\n")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(respPayload)
 
-		w.Write([]byte("Hello, I'm protected\n"))
-		w.Write(response)
 		return
 	}
 }
@@ -194,26 +202,15 @@ func CallBackToIAM(w http.ResponseWriter, r *http.Request) {
 		logger.Log.Info("TOKEN>> AccessToken>> " + token.AccessToken)
 		logger.Log.Info("TOKEN>> Expiration Time>> " + token.Expiry.String())
 		logger.Log.Info("TOKEN>> RefreshToken>> " + token.RefreshToken)
-
-		resp, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + url.QueryEscape(token.AccessToken))
-		if err != nil {
-			logger.Log.Error("Get: " + err.Error() + "\n")
-			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
-			return
-		}
-		defer resp.Body.Close()
-
-		response, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			logger.Log.Error("ReadAll: " + err.Error() + "\n")
-			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
-			return
+		respPayload := AuthenticationResponse{
+			AccessToken:  token.AccessToken,
+			Expiry:       token.Expiry.String(),
+			RefreshToken: token.RefreshToken,
 		}
 
-		logger.Log.Info("parseResponseBody: " + string(response) + "\n")
-
-		w.Write([]byte("Hello, I'm protected\n"))
-		w.Write(response)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(respPayload)
 		return
 	}
 }
