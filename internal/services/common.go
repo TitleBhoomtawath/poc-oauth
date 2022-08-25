@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/BNPrashanth/poc-go-oauth2/internal/helpers/pages"
-	"github.com/BNPrashanth/poc-go-oauth2/internal/logger"
+	"github.com/TitleBhoomtawath/poc-oauth/internal/helpers/pages"
+	"github.com/TitleBhoomtawath/poc-oauth/internal/logger"
 	"golang.org/x/oauth2"
 )
 
